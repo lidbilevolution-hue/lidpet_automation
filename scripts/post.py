@@ -31,9 +31,9 @@ REPO = os.environ.get("GITHUB_REPOSITORY", "")
 BRANCH = os.environ.get("BRANCH", "main")
 DRY = os.environ.get("DRY_RUN", "0") == "1"
 
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODELS = [m.strip() for m in os.environ.get(
-    "GEMINI_MODEL", "gemini-3.1-flash-lite,gemini-3.5-flash,gemini-2.5-flash").split(",") if m.strip()]
+AI_KEY = os.environ.get("AI_API_KEY", "")
+AI_BASE = os.environ.get("AI_BASE_URL", "https://api.z.ai/api/paas/v4").rstrip("/")
+AI_MODELS = [m.strip() for m in os.environ.get("AI_MODEL", "glm-4.6v-flash").split(",") if m.strip()]
 CAPTION_LANG = os.environ.get("CAPTION_LANG", "English")
 BRAND_HINT = os.environ.get("BRAND_HINT", "Lidpet, a brand for pet lovers (pet apparel and accessories)")
 
@@ -112,7 +112,7 @@ def fb_video(video, caption):
 
 
 
-# ---------- Auto caption (Gemini, free tier) ----------
+# ---------- Auto caption (OpenAI-compatible vision API: Zhipu GLM free by default) ----------
 def _img_b64(path: Path) -> str:
     from PIL import Image
     im = Image.open(path).convert("RGB")
@@ -123,7 +123,7 @@ def _img_b64(path: Path) -> str:
 
 
 def generate_caption(images):
-    if not GEMINI_KEY:
+    if not AI_KEY:
         return ""
     prompt = (
         f"You write social media captions for {BRAND_HINT}. "
@@ -131,28 +131,41 @@ def generate_caption(images):
         "with at most 2 emojis, (2) a blank line, (3) 12-15 relevant hashtags on a single line. "
         f"Language: {CAPTION_LANG}. Output only the final text, no intro, no markdown, no quotes."
     )
-    parts = [{"text": prompt}]
-    for img in images[:4]:
+    b64s = []
+    for img in images[:3]:
         try:
-            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": _img_b64(img)}})
+            b64s.append(_img_b64(img))
         except Exception as e:
             print(f"  [warn] ma9drtch n9ra {img.name}: {e}", file=sys.stderr)
-    for model in GEMINI_MODELS:
-        try:
-            r = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
-                json={"contents": [{"parts": parts}]}, timeout=120)
-            data = r.json()
-            if r.status_code >= 400:
-                raise RuntimeError(json.dumps(data)[:300])
-            text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"]).strip()
-            if text:
-                print(f"  [ok  ] caption generee b {model}")
-                return text
-        except Exception as e:
-            print(f"  [warn] gemini {model} fshl: {e}", file=sys.stderr)
+
+    # attempts: (nbr images, avec prefix data URI wla la)
+    attempts = [(len(b64s), True), (len(b64s), False)]
+    if len(b64s) > 1:
+        attempts += [(1, True), (1, False)]
+
+    for model in AI_MODELS:
+        for n, prefixed in attempts:
+            content = [{"type": "text", "text": prompt}]
+            for b in b64s[:n]:
+                url = f"data:image/jpeg;base64,{b}" if prefixed else b
+                content.append({"type": "image_url", "image_url": {"url": url}})
+            try:
+                r = requests.post(
+                    f"{AI_BASE}/chat/completions",
+                    headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": [{"role": "user", "content": content}]},
+                    timeout=120)
+                data = r.json()
+                if r.status_code >= 400 or "error" in data:
+                    raise RuntimeError(json.dumps(data)[:300])
+                text = data["choices"][0]["message"]["content"].strip()
+                if text:
+                    print(f"  [ok  ] caption generee b {model}")
+                    return text
+            except Exception as e:
+                print(f"  [warn] {model} (images={n}, prefix={prefixed}) fshl: {e}", file=sys.stderr)
     return ""
+
 
 # ---------- Main ----------
 def load_status(folder):
@@ -199,7 +212,7 @@ def main():
         print("  Ma kayn caption.txt, kanwlldha mn AI...")
         caption = generate_caption(images)
         if not caption:
-            print("Ma9drtch nwlld caption: zid GEMINI_API_KEY wla caption.txt", file=sys.stderr)
+            print("Ma9drtch nwlld caption: zid AI_API_KEY wla caption.txt", file=sys.stderr)
             sys.exit(1)
         print("  Caption:\n" + caption)
         if not DRY:
