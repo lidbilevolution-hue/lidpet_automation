@@ -40,7 +40,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
           DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          # Zhipu (Chine): https://open.bigmodel.cn/api/paas/v4 | Z.ai (international): https://api.z.ai/api/paas/v4
+          AI_BASE_URL: "https://api.z.ai/api/paas/v4"
+          AI_MODEL: "glm-4.6v-flash"
           # Lugha dial caption (baddal b "Arabic", "French"...)
           CAPTION_LANG: "English"
           BRAND_HINT: "Lidpet, a brand for pet lovers (pet apparel and accessories)"
