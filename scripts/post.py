@@ -4,6 +4,8 @@ Auto poster: Instagram + Facebook Page.
 - Folder fih images + video -> images = post, video = reel
 - caption.txt = caption + hashtags
 """
+import base64
+import io
 import json
 import os
 import shutil
@@ -28,6 +30,12 @@ IG_USER_ID = os.environ.get("IG_USER_ID", "")
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 BRANCH = os.environ.get("BRANCH", "main")
 DRY = os.environ.get("DRY_RUN", "0") == "1"
+
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODELS = [m.strip() for m in os.environ.get(
+    "GEMINI_MODEL", "gemini-3.1-flash-lite,gemini-3.5-flash,gemini-2.5-flash").split(",") if m.strip()]
+CAPTION_LANG = os.environ.get("CAPTION_LANG", "English")
+BRAND_HINT = os.environ.get("BRAND_HINT", "Lidpet, a brand for pet lovers (pet apparel and accessories)")
 
 
 def raw_url(path: Path) -> str:
@@ -103,6 +111,49 @@ def fb_video(video, caption):
     return api("POST", f"{FB_PAGE_ID}/videos", file_url=raw_url(video), description=caption)
 
 
+
+# ---------- Auto caption (Gemini, free tier) ----------
+def _img_b64(path: Path) -> str:
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    im.thumbnail((1024, 1024))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=80)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def generate_caption(images):
+    if not GEMINI_KEY:
+        return ""
+    prompt = (
+        f"You write social media captions for {BRAND_HINT}. "
+        "Look at the attached image(s) and write: (1) a short, warm, engaging caption of 2-3 sentences "
+        "with at most 2 emojis, (2) a blank line, (3) 12-15 relevant hashtags on a single line. "
+        f"Language: {CAPTION_LANG}. Output only the final text, no intro, no markdown, no quotes."
+    )
+    parts = [{"text": prompt}]
+    for img in images[:4]:
+        try:
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": _img_b64(img)}})
+        except Exception as e:
+            print(f"  [warn] ma9drtch n9ra {img.name}: {e}", file=sys.stderr)
+    for model in GEMINI_MODELS:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
+                json={"contents": [{"parts": parts}]}, timeout=120)
+            data = r.json()
+            if r.status_code >= 400:
+                raise RuntimeError(json.dumps(data)[:300])
+            text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"]).strip()
+            if text:
+                print(f"  [ok  ] caption generee b {model}")
+                return text
+        except Exception as e:
+            print(f"  [warn] gemini {model} fshl: {e}", file=sys.stderr)
+    return ""
+
 # ---------- Main ----------
 def load_status(folder):
     f = folder / "status.json"
@@ -144,6 +195,15 @@ def main():
     videos = [f for f in files if f.suffix.lower() in VID_EXT]
     cap_file = folder / "caption.txt"
     caption = cap_file.read_text(encoding="utf-8").strip() if cap_file.exists() else ""
+    if not caption:
+        print("  Ma kayn caption.txt, kanwlldha mn AI...")
+        caption = generate_caption(images)
+        if not caption:
+            print("Ma9drtch nwlld caption: zid GEMINI_API_KEY wla caption.txt", file=sys.stderr)
+            sys.exit(1)
+        print("  Caption:\n" + caption)
+        if not DRY:
+            cap_file.write_text(caption, encoding="utf-8")
 
     if not images and not videos:
         print("Folder khawi, kanmoviih l done/")
