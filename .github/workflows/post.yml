@@ -40,6 +40,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
           DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Lugha dial caption (baddal b "Arabic", "French"...)
+          CAPTION_LANG: "English"
+          BRAND_HINT: "Lidpet, a brand for pet lovers (pet apparel and accessories)"
         run: python scripts/post.py
 
       - name: Commit changes
