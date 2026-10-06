@@ -8,6 +8,7 @@ import base64
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -36,6 +37,11 @@ AI_BASE = os.environ.get("AI_BASE_URL", "https://api.z.ai/api/paas/v4").rstrip("
 AI_MODELS = [m.strip() for m in os.environ.get("AI_MODEL", "glm-4.6v-flash").split(",") if m.strip()]
 CAPTION_LANG = os.environ.get("CAPTION_LANG", "English")
 BRAND_HINT = os.environ.get("BRAND_HINT", "Lidpet, a brand for pet lovers (pet apparel and accessories)")
+
+
+def nat_key(p):
+    """Natural sort: 2 < 10, 001 < 002, img (2) < img (10)."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 
 def raw_url(path: Path) -> str:
@@ -196,14 +202,14 @@ def run_step(folder, st, key, fn, *args):
 
 
 def main():
-    folders = sorted(p for p in POSTS.iterdir() if p.is_dir())
+    folders = sorted((p for p in POSTS.iterdir() if p.is_dir()), key=nat_key)
     if not folders:
         print("Ma kayn ta folder f posts/")
         return
     folder = folders[0]
     print(f"Folder: {folder.name}")
 
-    files = sorted(folder.iterdir())
+    files = sorted(folder.iterdir(), key=nat_key)
     images = [f for f in files if f.suffix.lower() in IMG_EXT]
     videos = [f for f in files if f.suffix.lower() in VID_EXT]
     cap_file = folder / "caption.txt"
