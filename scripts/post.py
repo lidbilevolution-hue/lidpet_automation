@@ -31,6 +31,7 @@ IG_USER_ID = os.environ.get("IG_USER_ID", "")
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
 BRANCH = os.environ.get("BRANCH", "main")
 DRY = os.environ.get("DRY_RUN", "0") == "1"
+RECYCLE = os.environ.get("RECYCLE", "1") == "1"
 
 AI_KEY = os.environ.get("AI_API_KEY", "")
 AI_BASE = os.environ.get("AI_BASE_URL", "https://api.z.ai/api/paas/v4").rstrip("/")
@@ -204,17 +205,29 @@ def run_step(folder, st, key, fn, *args):
 def main():
     folders = sorted((p for p in POSTS.iterdir() if p.is_dir()), key=nat_key)
     if not folders:
-        print("Ma kayn ta folder f posts/")
-        return
+        done_dirs = sorted((p for p in DONE.iterdir() if p.is_dir()), key=nat_key)
+        if not (RECYCLE and done_dirs):
+            print("Ma kayn ta folder f posts/")
+            return
+        print(f"posts/ khawya: kanrj3o {len(done_dirs)} folders mn done/ w nbdaw mn lawl")
+        if not DRY:
+            for d in done_dirs:
+                (d / "caption_ai.txt").unlink(missing_ok=True)
+                (d / "status.json").unlink(missing_ok=True)
+                shutil.move(str(d), str(POSTS / d.name))
+        folders = sorted((p for p in (POSTS if not DRY else DONE).iterdir() if p.is_dir()), key=nat_key)
     folder = folders[0]
     print(f"Folder: {folder.name}")
 
     files = sorted(folder.iterdir(), key=nat_key)
     images = [f for f in files if f.suffix.lower() in IMG_EXT]
     videos = [f for f in files if f.suffix.lower() in VID_EXT]
-    cap_file = folder / "caption.txt"
+    cap_file = folder / "caption.txt"          # caption dyalk (kat-bqa dima)
+    ai_file = folder / "caption_ai.txt"        # caption li wlldha AI (kat-t-mseh mnin kayrj3 l cycle)
     caption = cap_file.read_text(encoding="utf-8").strip() if cap_file.exists() else ""
-    if not caption:
+    if not caption and ai_file.exists():
+        caption = ai_file.read_text(encoding="utf-8").strip()
+    if not caption and (images or videos):
         print("  Ma kayn caption.txt, kanwlldha mn AI...")
         caption = generate_caption(images)
         if not caption:
@@ -222,7 +235,7 @@ def main():
             sys.exit(1)
         print("  Caption:\n" + caption)
         if not DRY:
-            cap_file.write_text(caption, encoding="utf-8")
+            ai_file.write_text(caption, encoding="utf-8")
 
     if not images and not videos:
         print("Folder khawi, kanmoviih l done/")
