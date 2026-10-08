@@ -44,6 +44,10 @@ jobs:
           # Zhipu (Chine): https://open.bigmodel.cn/api/paas/v4 | Z.ai (international): https://api.z.ai/api/paas/v4
           AI_BASE_URL: "https://api.z.ai/api/paas/v4"
           AI_MODEL: "glm-4.6v-flash"
+          # Backup free AI (OpenRouter): kaykhdm ila z.ai msghol
+          AI2_API_KEY: ${{ secrets.AI2_API_KEY }}
+          AI2_BASE_URL: "https://openrouter.ai/api/v1"
+          AI2_MODEL: "openrouter/free"
           # Lugha dial caption (baddal b "Arabic", "French"...)
           CAPTION_LANG: "English"
           BRAND_HINT: "Lidpet, a brand for pet lovers (pet apparel and accessories)"
