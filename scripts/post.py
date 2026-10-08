@@ -35,6 +35,11 @@ RECYCLE = os.environ.get("RECYCLE", "1") == "1"
 
 AI_KEY = os.environ.get("AI_API_KEY", "")
 AI_BASE = os.environ.get("AI_BASE_URL", "https://api.z.ai/api/paas/v4").rstrip("/")
+AI2_KEY = os.environ.get("AI2_API_KEY", "")
+AI2_BASE = os.environ.get("AI2_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+AI2_MODELS = [m.strip() for m in os.environ.get("AI2_MODEL", "openrouter/free").split(",") if m.strip()]
+AI_ROUNDS = int(os.environ.get("AI_ROUNDS", "5"))
+FALLBACK_CAPTION = os.environ.get("FALLBACK_CAPTION", "").strip()
 AI_MODELS = [m.strip() for m in os.environ.get("AI_MODEL", "glm-4.6v-flash").split(",") if m.strip()]
 CAPTION_LANG = os.environ.get("CAPTION_LANG", "English")
 BRAND_HINT = os.environ.get("BRAND_HINT", "Lidpet, a brand for pet lovers (pet apparel and accessories)")
@@ -130,8 +135,14 @@ def _img_b64(path: Path) -> str:
 
 
 def generate_caption(images):
-    if not AI_KEY:
-        return ""
+    providers = []
+    if AI_KEY:
+        providers.append(("primary", AI_BASE, AI_KEY, AI_MODELS))
+    if AI2_KEY:
+        providers.append(("backup", AI2_BASE, AI2_KEY, AI2_MODELS))
+    if not providers:
+        return FALLBACK_CAPTION
+
     prompt = (
         f"You write social media captions for {BRAND_HINT}. "
         "Look at the attached image(s) and write: (1) a short, warm, engaging caption of 2-3 sentences "
@@ -150,28 +161,45 @@ def generate_caption(images):
     if len(b64s) > 1:
         attempts += [(1, True), (1, False)]
 
-    for model in AI_MODELS:
-        for n, prefixed in attempts:
-            content = [{"type": "text", "text": prompt}]
-            for b in b64s[:n]:
-                url = f"data:image/jpeg;base64,{b}" if prefixed else b
-                content.append({"type": "image_url", "image_url": {"url": url}})
-            try:
-                r = requests.post(
-                    f"{AI_BASE}/chat/completions",
-                    headers={"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"},
-                    json={"model": model, "messages": [{"role": "user", "content": content}]},
-                    timeout=120)
-                data = r.json()
-                if r.status_code >= 400 or "error" in data:
-                    raise RuntimeError(json.dumps(data)[:300])
-                text = data["choices"][0]["message"]["content"].strip()
-                if text:
-                    print(f"  [ok  ] caption generee b {model}")
-                    return text
-            except Exception as e:
-                print(f"  [warn] {model} (images={n}, prefix={prefixed}) fshl: {e}", file=sys.stderr)
-    return ""
+    def is_transient(msg: str) -> bool:
+        m = msg.lower()
+        return any(x in m for x in ("1305", "overload", "429", "rate", "timeout", "temporar", "503", "502", "500"))
+
+    for rnd in range(AI_ROUNDS):
+        saw_transient = False
+        for name, base, key, models in providers:
+            for model in models:
+                for n, prefixed in attempts:
+                    content = [{"type": "text", "text": prompt}]
+                    for b in b64s[:n]:
+                        url = f"data:image/jpeg;base64,{b}" if prefixed else b
+                        content.append({"type": "image_url", "image_url": {"url": url}})
+                    try:
+                        r = requests.post(
+                            f"{base}/chat/completions",
+                            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                            json={"model": model, "messages": [{"role": "user", "content": content}]},
+                            timeout=120)
+                        data = r.json()
+                        if r.status_code >= 400 or "error" in data:
+                            raise RuntimeError(json.dumps(data)[:300])
+                        text = (data["choices"][0]["message"].get("content") or "").strip()
+                        if text:
+                            print(f"  [ok  ] caption generee ({name}: {model})")
+                            return text
+                    except Exception as e:
+                        print(f"  [warn] round {rnd+1} {name}/{model} (images={n}, prefix={prefixed}) fshl: {e}",
+                              file=sys.stderr)
+                        if is_transient(str(e)):
+                            saw_transient = True
+                            break  # server msghol: ma n3awdch variantes
+        if saw_transient and rnd < AI_ROUNDS - 1:
+            wait = 20 * (rnd + 1)
+            print(f"  server AI msghol, kanstnaw {wait}s w n3awdo...")
+            time.sleep(wait)
+        elif not saw_transient:
+            break
+    return FALLBACK_CAPTION
 
 
 # ---------- Main ----------
